@@ -70,7 +70,7 @@ fn main() {
                 .short("n")
                 .long("no-context")
                 .help("Interpret without a context (disables `let` assignments and manual type bound checks (`x:T`).)"))
-            .about("Interpreter for the λω corner of the lambda cube. Equivalent to simply typed lambda calculus with type operators."))
+            .about("Interpreter for the λω corner of the lambda cube. The simply typed lambda calculus with type operators."))
         .subcommand(SubCommand::with_name("systemf")
             .arg(Arg::with_name("noctx")
                 .short("n")
