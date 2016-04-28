@@ -56,17 +56,17 @@ fn main() {
         .subcommand(SubCommand::with_name("untyped")
             .arg(Arg::with_name("noctx")
                 .short("n")
-                .long("nocontext")
+                .long("no-context")
                 .help("Interpret without a context (disables `let` assignments.)"))
             .about("Untyped lambda calculus interpreter."))
         .subcommand(SubCommand::with_name("simple")
             .about("Simply typed lambda calculus interpreter."))
-        .subcommand(SubCommand::with_name("systemf"))
+        .subcommand(SubCommand::with_name("systemf")
             .arg(Arg::with_name("noctx")
                 .short("n")
-                .long("nocontext")
+                .long("no-context")
                 .help("Interpret without a context (disables `let` assignments and manual type bound checks (`x:T`).)"))
-            .about("System F interpreter.").get_matches();
+            .about("System F interpreter.")).get_matches();
 
     if let Some(matches) = matches.subcommand_matches("untyped") {
         if matches.is_present("noctx") {
@@ -77,7 +77,7 @@ fn main() {
         }
     } else if let Some(_) = matches.subcommand_matches("simple") {
         enter_repl(lambda::simple::evaluate)
-    } else if let Some(_) = matches.subcommand_matches("systemf") {
+    } else if let Some(matches) = matches.subcommand_matches("systemf") {
         if matches.is_present("noctx") {
             println!("Entering non-contextual REPL.");
             enter_repl(lambda::systemf::evaluate);
