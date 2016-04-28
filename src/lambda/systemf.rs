@@ -40,7 +40,7 @@ pub enum Type {
     Atomic(Ident),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Context {
     ident_max: Cell<usize>,
     vals: HashMap<Ident, (Option<Expr>, Type)>,
@@ -176,7 +176,13 @@ impl PartialEq for Type {
 
 impl Context {
     pub fn new() -> Context {
-        Context { ident_max: Cell::new(0), vals: HashMap::new(), types: HashMap::new() }
+        Context { ident_max: Cell::new(1), vals: HashMap::new(), types: HashMap::new() }
+    }
+}
+
+impl Default for Context {
+    fn default() -> Context {
+        Context::new()
     }
 }
 
