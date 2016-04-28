@@ -33,6 +33,8 @@ pub enum Expr {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
+    TyLambda { var: Ident, body: Box<Type> },
+    TyApply { lhs: Box<Type>, rhs: Box<Type> },
     Func { arg: Box<Type>, ret: Box<Type> },
     Atomic(Ident),
 }
@@ -73,6 +75,8 @@ impl fmt::Display for Expr {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            &TyLambda { ref var, ref body } => write!(f, "λ{}.{}", var, body),
+            &TyApply { ref lhs, ref rhs } => write!(f, "{} {}", lhs, rhs),
             &Func { ref arg, ref ret } => match arg.as_ref() {
                 &Func { .. } => write!(f, "({})→{}", arg, ret),
                 _ => write!(f, "{}→{}", arg, ret),
@@ -115,8 +119,6 @@ impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let &Ident(ref name, _) = self;
         name.fmt(f)
-        // let &Ident(ref name, ref scope) = self;
-        // write!(f, "{}[{}]", name, scope)
     }
 }
 
@@ -158,8 +160,8 @@ impl Expr {
             Term(ident) =>
                 if let Some(&(ref opt_val, ref ty)) = ctx.vals.get(&ident) {
                     match opt_val.as_ref() {
-                        Some(val) => Ok((val.clone(), ty.clone())),
-                        None => Ok((Term(ident), ty.clone())),
+                        Some(val) => Ok((val.clone(), ty.clone().reduce(Cow::Borrowed(ctx.as_ref())))),
+                        None => Ok((Term(ident), ty.clone().reduce(Cow::Borrowed(ctx.as_ref())))),
                     }
                 } else {
                     Err(TypeError::UntypedTerm(ident))
@@ -169,14 +171,52 @@ impl Expr {
 }
 
 impl Type {
-    pub fn eq_in_ctx(&self, rhs: &Type, ctx: Cow<Context>) -> bool {
+    pub fn eq_in_ctx(&self, rhs: &Type, mut ctx: Cow<Context>) -> bool {
         match (self, rhs) {
+            (&TyLambda { var: ref lvar, body: ref lbody }, &TyLambda { var: ref rvar, body: ref rbody }) =>
+                {
+                    ctx.to_mut().types.insert(lvar.clone(), Atomic(rvar.clone()));
+                    let rbody = rbody.clone().reduce(Cow::Borrowed(ctx.as_ref()));
+                    lbody.as_ref().eq_in_ctx(&rbody, ctx)
+                },
+            (&TyApply { lhs: ref l_lhs, rhs: ref l_rhs }, &TyApply { lhs: ref r_lhs, rhs: ref r_rhs }) => l_lhs.eq_in_ctx(r_lhs, Cow::Borrowed(ctx.as_ref())) && l_rhs.eq_in_ctx(r_rhs, Cow::Borrowed(ctx.as_ref())),
             (&Func { arg: ref larg, ret: ref lret }, &Func { arg: ref rarg, ret: ref rret }) => larg == rarg && lret == rret,
-            (&Atomic(ref lident), &Atomic(ref rident)) => lident == rident || match (ctx.types.get(lident), ctx.types.get(rident)) {
-                (Some(lhs_val), Some(rhs_val)) => lhs_val == rhs_val,
-                _ => false,
-            },
+            (&Atomic(ref lident), &Atomic(ref rident)) =>
+                lident == rident ||
+                match (ctx.types.get(lident), ctx.types.get(rident)) {
+                    (Some(lhs_val), Some(rhs_val)) => lhs_val == rhs_val,
+                    _ => false,
+                },
+            (&Atomic(ref a), ref b) => match ctx.types.get(a)
+                {
+                    Some(a) => a.eq_in_ctx(b, Cow::Borrowed(ctx.as_ref())),
+                    None => false,
+                },
+            (ref b, &Atomic(ref a)) => match ctx.types.get(a)
+                { // Non-DRY due to lifetime weirdness.
+                    Some(a) => a.eq_in_ctx(b, Cow::Borrowed(ctx.as_ref())),
+                    None => false,
+                },
             _ => false,
+        }
+    }
+
+    pub fn reduce(self, mut ctx: Cow<Context>) -> Type {
+        match self {
+            TyLambda { var, body } => { ctx.to_mut().types.remove(&var); TyLambda { var: var, body: Box::new(body.reduce(ctx)) } },
+            TyApply { lhs, rhs } =>
+                {
+                    let lhs = lhs.reduce(Cow::Borrowed(ctx.as_ref()));
+                    let rhs = rhs.reduce(Cow::Borrowed(ctx.as_ref()));
+                    if let TyLambda { var, body } = lhs {
+                        ctx.to_mut().types.insert(var, rhs);
+                        body.reduce(ctx)
+                    } else {
+                        TyApply { lhs: Box::new(lhs), rhs: Box::new(rhs) }
+                    }
+                },
+            Func { arg, ret } => Func { arg: Box::new(arg.reduce(Cow::Borrowed(ctx.as_ref()))), ret: Box::new(ret.reduce(ctx)) },
+            Atomic(ident) => { if let Some(ty) = ctx.types.get(&ident) { ty.clone() } else { Atomic(ident) } },
         }
     }
 }
@@ -202,23 +242,52 @@ fn is_type_body_char(c: char) -> bool { (c >= 'A' && c <= 'Z') || (c >= 'a' && c
 named!(_type_ident<&str, String>, map!(tuple!(take_while1_s!(is_type_begin_char), take_while_s!(is_type_body_char)), |(pre, suf)| String::from(pre) + suf));
 named!(type_ident<&str, String, String>, fix_error!(String, _type_ident));
 
-fn ty<'a>(input: &'a str, unique: &Cell<usize>, ctx: Cow<HashMap<String, usize>>) -> IResult<&'a str, Type, String> {
-    chain!(input,
-        whitespace ~
-        lhs: alt_complete!(
-            map!(type_ident, |s| {
-                let u = ctx.get(&s).map_or(0usize, |&scope| scope);
-                Atomic(Ident(s, u))
-            }) |
-            delimited!(string!("("), str_error!(format!("Expected type inside parentheses!"), apply!(ty, unique, Cow::Borrowed(ctx.as_ref()))), req_string!(")"))
-        ) ~
-        whitespace ~
-        rhs: preceded!(alt_complete!(string!("->") | string!("→")), str_error!(format!("Expected type after `{} → `!", lhs), apply!(ty, unique, Cow::Borrowed(ctx.as_ref()))))?,
-        move || match rhs {
-            Some(rhs) => Type::Func { arg: Box::new(lhs), ret: Box::new(rhs) },
-            None => lhs,
-        }
+fn atomic_ty<'a>(input: &'a str, unique: &Cell<usize>, mut ctx: Cow<HashMap<String, usize>>) -> IResult<&'a str, Type, String> {
+    preceded!(input,
+        whitespace,
+        alt_complete!(
+            chain!(
+                alt_complete!(string!("λ") | string!("\\")) ~
+                whitespace ~
+                id: chain!(
+                    id: str_error!(format!("Expected a type variable in type-level lambda abstraction!"), type_ident),
+                    || {
+                        let cur = unique.get();
+                        unique.set(cur + 1);
+                        ctx.to_mut().insert(id.clone(), cur);
+                        Ident(id, cur)
+                    }
+                ) ~
+                whitespace ~
+                req_string!(".") ~
+                body: str_error!(format!("Expected type body in type-level lambda abstraction beginning `λ{}.`!", id), apply!(ty, unique, Cow::Borrowed(ctx.as_ref()))),
+                || TyLambda { var: id, body: Box::new(body) }
+            ) |
+            chain!(
+                lhs: alt_complete!(
+                    map!(type_ident, |s| {
+                        let u = ctx.get(&s).map_or(0usize, |&scope| scope);
+                        Atomic(Ident(s, u))
+                    }) |
+                    delimited!(string!("("), str_error!(format!("Expected type inside parentheses!"), apply!(ty, unique, Cow::Borrowed(ctx.as_ref()))), req_string!(")"))
+                ) ~
+                whitespace ~
+                rhs: preceded!(alt_complete!(string!("->") | string!("→")), str_error!(format!("Expected type after `{} → `!", lhs), apply!(ty, unique, Cow::Borrowed(ctx.as_ref()))))?,
+                move || match rhs {
+                    Some(rhs) => Type::Func { arg: Box::new(lhs), ret: Box::new(rhs) },
+                    None => lhs,
+                }
+            )
+        )
     )
+}
+
+fn ty<'a>(input: &'a str, unique: &Cell<usize>, ctx: Cow<HashMap<String, usize>>) -> IResult<&'a str, Type, String> {
+    map!(input, many1!(apply!(atomic_ty, unique, Cow::Borrowed(ctx.as_ref()))), |types: Vec<Type>| {
+            let mut iter = types.into_iter();
+            let fst = iter.next().unwrap();
+            iter.fold(fst, |lhs, rhs| TyApply { lhs: Box::new(lhs), rhs: Box::new(rhs) })
+        })
 }
 
 fn atomic_expr<'a>(input: &'a str, unique: &Cell<usize>, mut ctx: Cow<HashMap<String, usize>>) -> IResult<&'a str, Expr, String> {
@@ -324,12 +393,25 @@ fn command<'a>(s: &'a str, ctx: &mut Context) -> IResult<&'a str, Result<String,
                 };
 
                 match bound {
-                    Some(ref exp_ty) if !ty.eq_in_ctx(exp_ty, Cow::Borrowed(ctx)) => Err(format!("{} : {} ({} != {})\nExpected type did not match!", expr, ty, exp_ty, ty)),
+                    Some(ref exp_ty) =>
+                        {
+                            // I'm annoyed by the .clone() here, but it's there to alleviate problems with nom and the way its chain!() macros expand. Too lazy to really fix now.
+                            let exp_ty = exp_ty.clone().reduce(Cow::Borrowed(ctx));
+                            if !ty.eq_in_ctx(&exp_ty, Cow::Borrowed(ctx)) {
+                                Err(format!("{} : {} ({} != {})\nExpected type did not match!", expr, ty, exp_ty, ty))
+                            } else {
+                                Ok(format!("{} : {}", expr, ty))
+                            }
+                        },
                     _ => Ok(format!("{} : {}", expr, ty))
                 }
             }
         ) |
-        cmd_errval!(format!("Expected `let <id> = <expression>`, `let <type_id> : <type>`, `let <id> = <type>`, `<expression> : <type>`, or expression!"))
+        chain!(
+            ty: apply!(ty, &mut ctx.ident_max, Cow::Owned(HashMap::new())),
+            || Ok(ty.reduce(Cow::Borrowed(ctx)).to_string())
+        ) |
+        cmd_errval!(format!("Expected `let <id> = <expression>`, `let <type_id> : <type>`, `let <id> = <type>`, `<expression> : <type>`, `<expression>`, or `<type>`!"))
     )
 }
 

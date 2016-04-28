@@ -60,7 +60,17 @@ fn main() {
                 .help("Interpret without a context (disables `let` assignments.)"))
             .about("Untyped lambda calculus interpreter."))
         .subcommand(SubCommand::with_name("simple")
+            .arg(Arg::with_name("noctx")
+                .short("n")
+                .long("no-context")
+                .help("Interpret without a context (disables `let` assignments and manual type bound checks (`x:T`).)"))
             .about("Simply typed lambda calculus interpreter."))
+        .subcommand(SubCommand::with_name("omega")
+            .arg(Arg::with_name("noctx")
+                .short("n")
+                .long("no-context")
+                .help("Interpret without a context (disables `let` assignments and manual type bound checks (`x:T`).)"))
+            .about("Interpreter for the λω corner of the lambda cube. Equivalent to simply typed lambda calculus with type operators."))
         .subcommand(SubCommand::with_name("systemf")
             .arg(Arg::with_name("noctx")
                 .short("n")
@@ -75,8 +85,20 @@ fn main() {
         } else {
             enter_contextual_repl(lambda::untyped::evaluate_in_ctx);
         }
-    } else if let Some(_) = matches.subcommand_matches("simple") {
-        enter_repl(lambda::simple::evaluate)
+    } else if let Some(matches) = matches.subcommand_matches("simple") {
+        if matches.is_present("noctx") {
+            println!("Entering non-contextual REPL.");
+            enter_repl(lambda::simple::evaluate);
+        } else {
+            enter_contextual_repl(lambda::simple::evaluate_in_ctx);
+        }
+    } else if let Some(matches) = matches.subcommand_matches("omega") {
+        if matches.is_present("noctx") {
+            println!("Entering non-contextual REPL.");
+            enter_repl(lambda::omega::evaluate);
+        } else {
+            enter_contextual_repl(lambda::omega::evaluate_in_ctx);
+        }
     } else if let Some(matches) = matches.subcommand_matches("systemf") {
         if matches.is_present("noctx") {
             println!("Entering non-contextual REPL.");
@@ -84,5 +106,7 @@ fn main() {
         } else {
             enter_contextual_repl(lambda::systemf::evaluate_in_ctx);
         }
+    } else {
+        println!("{}", matches.usage());
     }
 }

@@ -64,64 +64,69 @@ use self::Type::*;
 impl Expr {
     pub fn reduce(self, mut ctx: Cow<Context>) -> Result<(Expr, Type), TypeError> {
         match self {
-            Lambda { var, ty, body } => {
-                ctx.to_mut().vals.insert(var.clone(), (None, ty.clone()));
-                let (body, body_ty) = try!(body.reduce(Cow::Borrowed(ctx.as_ref())));
-                let ty = ty.reduce(ctx);
-                Ok((Lambda { var: var, ty: ty.clone(), body: Box::new(body) }, Func { arg: Box::new(ty), ret: Box::new(body_ty) }))
-            },
-            TyLambda { var, body } => {
-                ctx.to_mut().types.remove(&var);
-                let (body, body_ty) = try!(body.reduce(ctx));
-                Ok((TyLambda { var: var.clone(), body: Box::new(body) }, Forall { var: var, body: Box::new(body_ty) }))
-            },
-            Apply { lhs, rhs } => {
-                // Try to reduce lhs and find its type.
-                let (lhs, lhs_ty) = try!(lhs.reduce(Cow::Borrowed(ctx.as_ref())));
-                if let Func { arg: lhs_arg, ret: lhs_ret } = lhs_ty {
-                    let (rhs, rhs_ty) = try!(rhs.reduce(Cow::Borrowed(ctx.as_ref())));
-                    if !lhs_arg.eq_in_ctx(&rhs_ty, Cow::Borrowed(ctx.as_ref())) {
-                        Err(TypeError::Mismatch {
-                            got: (rhs, rhs_ty),
-                            expected: *lhs_arg,
-                        })
+            Lambda { var, ty, body } =>
+                {
+                    ctx.to_mut().vals.insert(var.clone(), (None, ty.clone()));
+                    let (body, body_ty) = try!(body.reduce(Cow::Borrowed(ctx.as_ref())));
+                    let ty = ty.reduce(ctx);
+                    Ok((Lambda { var: var, ty: ty.clone(), body: Box::new(body) }, Func { arg: Box::new(ty), ret: Box::new(body_ty) }))
+                },
+            TyLambda { var, body } =>
+                {
+                    ctx.to_mut().types.remove(&var);
+                    let (body, body_ty) = try!(body.reduce(ctx));
+                    Ok((TyLambda { var: var.clone(), body: Box::new(body) }, Forall { var: var, body: Box::new(body_ty) }))
+                },
+            Apply { lhs, rhs } =>
+                {
+                    // Try to reduce lhs and find its type.
+                    let (lhs, lhs_ty) = try!(lhs.reduce(Cow::Borrowed(ctx.as_ref())));
+                    if let Func { arg: lhs_arg, ret: lhs_ret } = lhs_ty {
+                        let (rhs, rhs_ty) = try!(rhs.reduce(Cow::Borrowed(ctx.as_ref())));
+                        if !lhs_arg.eq_in_ctx(&rhs_ty, Cow::Borrowed(ctx.as_ref())) {
+                            Err(TypeError::Mismatch {
+                                got: (rhs, rhs_ty),
+                                expected: *lhs_arg,
+                            })
+                        } else {
+                            if let Lambda { var, ty: _, body } = lhs {
+                                ctx.to_mut().vals.insert(var, (Some(rhs), *lhs_arg));
+                                body.reduce(ctx)
+                            } else {
+                                Ok((Apply { lhs: Box::new(lhs), rhs: Box::new(rhs) }, *lhs_ret))
+                            }
+                        }
                     } else {
-                        if let Lambda { var, ty: _, body } = lhs {
-                            ctx.to_mut().vals.insert(var, (Some(rhs), *lhs_arg));
+                        Err(TypeError::Application { subj: try!(lhs.reduce(Cow::Borrowed(ctx.as_ref()))), arg: try!(rhs.reduce(ctx)) })
+                    }
+                },
+            TyApply { lhs, rhs } =>
+                {
+                    let (lhs, lhs_ty) = try!(lhs.reduce(Cow::Borrowed(ctx.as_ref())));
+                    if let Forall { var, body } = lhs_ty {
+                        let rhs = rhs.reduce(Cow::Borrowed(ctx.as_ref()));
+                        if let TyLambda { var, body } = lhs {
+                            ctx.to_mut().types.insert(var, rhs);
                             body.reduce(ctx)
                         } else {
-                            Ok((Apply { lhs: Box::new(lhs), rhs: Box::new(rhs) }, *lhs_ret))
+                            let ret_ty = body.substitute(&var, &rhs);
+                            Ok((TyApply { lhs: Box::new(lhs), rhs: rhs }, ret_ty))
                         }
-                    }
-                } else {
-                    Err(TypeError::Application { subj: try!(lhs.reduce(Cow::Borrowed(ctx.as_ref()))), arg: try!(rhs.reduce(ctx)) })
-                }
-            },
-            TyApply { lhs, rhs } => {
-                let (lhs, lhs_ty) = try!(lhs.reduce(Cow::Borrowed(ctx.as_ref())));
-                if let Forall { var, body } = lhs_ty {
-                    let rhs = rhs.reduce(Cow::Borrowed(ctx.as_ref()));
-                    if let TyLambda { var, body } = lhs {
-                        ctx.to_mut().types.insert(var, rhs);
-                        body.reduce(ctx)
                     } else {
-                        let ret_ty = body.substitute(&var, &rhs);
-                        Ok((TyApply { lhs: Box::new(lhs), rhs: rhs }, ret_ty))
+                        Err(TypeError::TyApplication { subj: (lhs, lhs_ty), arg: rhs })
                     }
-                } else {
-                    Err(TypeError::TyApplication { subj: (lhs, lhs_ty), arg: rhs })
-                }
-            },
-            Term(ident) => {
-                if let Some(&(ref opt_val, ref ty)) = ctx.vals.get(&ident) {
-                    match opt_val.as_ref() {
-                        Some(val) => Ok((val.clone(), ty.clone().reduce(Cow::Borrowed(ctx.as_ref())))),
-                        None => Ok((Term(ident), ty.clone().reduce(Cow::Borrowed(ctx.as_ref())))),
+                },
+            Term(ident) =>
+                {
+                    if let Some(&(ref opt_val, ref ty)) = ctx.vals.get(&ident) {
+                        match opt_val.as_ref() {
+                            Some(val) => Ok((val.clone(), ty.clone().reduce(Cow::Borrowed(ctx.as_ref())))),
+                            None => Ok((Term(ident), ty.clone().reduce(Cow::Borrowed(ctx.as_ref())))),
+                        }
+                    } else {
+                        Err(TypeError::UntypedTerm(ident))
                     }
-                } else {
-                    Err(TypeError::UntypedTerm(ident))
                 }
-            }
         }
     }
 }
@@ -216,16 +221,19 @@ impl fmt::Display for Type {
 
 impl fmt::Display for Context {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = String::from("Γ = {\n");
+        let mut s = String::from("Context:\n    Types:\n");
+        for (ref id, ref ty) in self.types.iter() {
+            s.push_str(format!("        {} = {};", id, ty).as_str())
+        }
+        s.push_str("    Values:\n");
         for (ref id, &(ref opt_val, ref ty)) in self.vals.iter() {
             s.push_str(
                 match opt_val {
-                    &Some(ref val) => format!("    {} : {} = {}\n", id, ty, val),
-                    &None => format!("    {} : {}\n", id, ty),
+                    &Some(ref val) => format!("        {} : {} = {};\n", id, ty, val),
+                    &None => format!("        {} : {};\n", id, ty),
                 }.as_str()
             )
         }
-        s.push_str("}\n");
         s.fmt(f)
     }
 }
