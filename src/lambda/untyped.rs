@@ -31,7 +31,7 @@ pub enum Expr {
     Term(Ident),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Context {
     ident_max: Cell<usize>,
     vals: HashMap<Ident, Expr>,
@@ -54,6 +54,8 @@ impl fmt::Display for Expr {
 
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // let &Ident(ref name, ref scope) = self;
+        // write!(f, "{}[{}]", name, scope)
         let &Ident(ref name, _) = self;
         name.fmt(f)
     }
@@ -62,7 +64,7 @@ impl fmt::Display for Ident {
 impl<T: AsRef<str>> From<T> for Expr {
     fn from(s: T) -> Expr {
         use nom::IResult::*;
-        match expr(s.as_ref(), &Cell::new(0), Cow::Owned(HashMap::new())) {
+        match expr(s.as_ref(), &Cell::new(1), Cow::Owned(HashMap::new())) {
             Done(i, e) => {
                 if i.len() > 0 {
                     panic!("Unparsed output: {:?}", i);
@@ -79,25 +81,35 @@ impl Expr {
         match self {
             Lambda(id, body) =>
                 {
-                    ctx.to_mut().vals.remove(&id);
                     Lambda(id, Box::new(body.reduce(ctx)))
                 },
             Apply(lhs, rhs) =>
-                if let Lambda(id, body) = lhs.clone().reduce(Cow::Borrowed(ctx.as_ref())) {
-                    ctx.to_mut().vals.insert(id, *rhs);
-                    body.reduce(ctx)
-                } else { Apply(lhs, rhs) },
+                {
+                    let lhs = lhs.reduce(Cow::Borrowed(ctx.as_ref()));
+                    if let Lambda(id, body) = lhs {
+                        ctx.to_mut().vals.insert(id, *rhs);
+                        body.reduce(ctx)
+                    } else { Apply(Box::new(lhs), rhs) }
+                },
             Term(id) =>
                 if let Some(val) = ctx.vals.get(&id) {
                     val.clone().reduce(Cow::Borrowed(ctx.as_ref()))
-                } else { Term(id) },
+                } else {
+                    Term(id)
+                },
         }
     }
 }
 
 impl Context {
     fn new() -> Context {
-        Context { ident_max: Cell::new(0), vals: HashMap::new() }
+        Context { ident_max: Cell::new(1), vals: HashMap::new() }
+    }
+}
+
+impl Default for Context {
+    fn default() -> Context {
+        Context::new()
     }
 }
 
@@ -170,7 +182,7 @@ fn command<'a>(input: &'a str, ctx: &mut Context) -> IResult<&'a str, Result<Str
             e: str_error!(format!("Expected expression after `let {} = `!", id), apply!(expr, &ctx.ident_max, Cow::Owned(HashMap::new()))),
             || {
                 let normal = e.reduce(Cow::Borrowed(ctx));
-                let s = normal.to_string();
+                let s = format!("{} = {}", Ident(id.clone(), 0), normal.to_string());
                 ctx.vals.insert(Ident(id, 0), normal);
                 Ok(s)
             }
