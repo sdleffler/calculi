@@ -6,7 +6,7 @@ This is a small project intending for learning about/messing with variants of th
 Currently implemented:
 - Untyped λ-calculus
 - Simply typed λ-calculus (no `let` assignments)
-- System Fω (λ-calculus with terms depending on types)
+- System F (λ-calculus with terms depending on types)
 - λω-calculus (the lower, far, left-hand corner of the [λ-cube](https://en.wikipedia.org/wiki/Lambda_cube). Non-polymorphic lambda calculus with type operators.)
 
 Coming soon:
