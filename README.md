@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/sdleffler/calculi.svg?branch=master)](https://travis-ci.org/sdleffler/calculi)
 # Lambda calculus playground
 
 This is a small project intending for learning about/messing with variants of the [λ-calculus](https://en.wikipedia.org/wiki/Lambda_calculus).
