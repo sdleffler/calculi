@@ -5,6 +5,4 @@ authors = ["Sean Leffler <sean@errno.com>"]
 
 [dependencies]
 clap = "2.3.0"
-
-[dependencies.lambda]
-path = "src/lambda"
+nom = "1.2.2"

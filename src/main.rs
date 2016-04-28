@@ -1,5 +1,9 @@
+#[macro_use]
+extern crate nom;
+
 extern crate clap;
-extern crate lambda;
+
+mod lambda;
 
 use std::fmt::Display;
 use std::io::{self, BufRead, Write};
@@ -58,6 +62,10 @@ fn main() {
         .subcommand(SubCommand::with_name("simple")
             .about("Simply typed lambda calculus interpreter."))
         .subcommand(SubCommand::with_name("systemf"))
+            .arg(Arg::with_name("noctx")
+                .short("n")
+                .long("nocontext")
+                .help("Interpret without a context (disables `let` assignments and manual type bound checks (`x:T`).)"))
             .about("System F interpreter.").get_matches();
 
     if let Some(matches) = matches.subcommand_matches("untyped") {
@@ -70,6 +78,11 @@ fn main() {
     } else if let Some(_) = matches.subcommand_matches("simple") {
         enter_repl(lambda::simple::evaluate)
     } else if let Some(_) = matches.subcommand_matches("systemf") {
-        enter_contextual_repl(lambda::systemf::evaluate_in_ctx);
+        if matches.is_present("noctx") {
+            println!("Entering non-contextual REPL.");
+            enter_repl(lambda::systemf::evaluate);
+        } else {
+            enter_contextual_repl(lambda::systemf::evaluate_in_ctx);
+        }
     }
 }

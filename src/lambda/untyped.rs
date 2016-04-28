@@ -5,7 +5,7 @@ use std::fmt;
 
 use nom::*;
 
-use ::{get_deepest_custom_error, whitespace};
+use lambda::{get_deepest_custom_error, whitespace};
 
 macro_rules! string {
     ($i:expr, $s:expr) => (fix_error!($i, String, complete!(tag_s!($s))))
